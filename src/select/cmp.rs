@@ -175,7 +175,6 @@ impl Cmp for CmpOr {
     }
 }
 
-
 #[cfg(test)]
 mod cmp_inner_tests {
     use serde_json::Value;

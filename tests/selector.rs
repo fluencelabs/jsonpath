@@ -120,12 +120,58 @@ fn selector_remove() {
         .select()
         .unwrap();
 
-    assert_eq!(
-        result,
-        vec![
-            &json!(8.95),
-            &json!(12.99),
-            &json!(8.99)
-        ]
-    );
+    assert_eq!(result, vec![&json!(8.95), &json!(12.99), &json!(8.99)]);
+}
+
+#[test]
+fn iter_test() {
+    use std::rc::Rc;
+
+    struct T {
+        pub value: Rc<Value>,
+        pub tt: i32,
+    };
+
+    let t = Value::Array(vec![
+        Value::String(String::from("vv")),
+        Value::Array(vec![]),
+    ]);
+    let t1 = T {
+        value: Rc::new(t.clone()),
+        tt: 1,
+    };
+    let t2 = T {
+        value: Rc::new(t.clone()),
+        tt: 1,
+    };
+
+    let values = vec![t1, t2];
+
+    let mut selector = Selector::default();
+
+    let path = "$.[0]";
+    let result = selector
+        .str_path(path)
+        .unwrap()
+        .values_iter(values.iter().map(|v| v.value.as_ref()))
+        .select()
+        .unwrap();
+
+    assert_eq!(result, vec![&json!(["vv", []])]);
+
+    let result = jsonpath::select_with_iter(values.iter().map(|v| v.value.as_ref()), path).unwrap();
+    assert_eq!(result.0, vec![&json!(["vv", []])]);
+    assert_eq!(result.1, vec![0]);
+
+    let values = vec![json!([1, 2, 3, 4]), json!([2, 2]), json!(3)];
+
+    let mut selector = Selector::default();
+    let result = selector
+        .str_path(path)
+        .unwrap()
+        .values_iter(values.iter())
+        .select()
+        .unwrap();
+
+    assert_eq!(result, vec![&json!([1, 2, 3, 4])]);
 }

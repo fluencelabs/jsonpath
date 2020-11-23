@@ -305,6 +305,18 @@ pub fn select<'a>(json: &'a Value, path: &str) -> Result<Vec<&'a Value>, JsonPat
     Selector::default().str_path(path)?.value(json).select()
 }
 
+pub fn select_with_iter<'a>(
+    json: impl ExactSizeIterator<Item = &'a Value> + 'a,
+    path: &str,
+) -> Result<(Vec<&'a Value>, Vec<usize>), JsonPathError> {
+    let mut selector = Selector::default();
+    let json = selector.str_path(path)?.values_iter(json).select()?;
+
+    let chose_indices = selector.chose_indices();
+
+    Ok((json, chose_indices))
+}
+
 /// It is the same to `select` function but it return the result as string.
 ///
 /// ```rust
@@ -377,7 +389,9 @@ pub fn select_as<T: serde::de::DeserializeOwned>(
     path: &str,
 ) -> Result<Vec<T>, JsonPathError> {
     let json = serde_json::from_str(json_str).map_err(|e| JsonPathError::Serde(e.to_string()))?;
-    Selector::default().str_path(path)?.value(&json).select_as()
+    let t = Selector::default().str_path(path)?.value(&json).select_as();
+
+    t
 }
 
 /// Delete(= replace with null) the JSON property using the jsonpath.

@@ -1,18 +1,20 @@
 use serde_json::Value;
 use std::collections::HashSet;
 
-pub(super) struct ValueWalker;
+pub(super) struct JValueWalker;
 
-impl<'a> ValueWalker {
+impl<'a> JValueWalker {
     pub fn all_with_num(vec: &[&'a Value], tmp: &mut Vec<&'a Value>, index: f64) {
-        Self::walk(vec, tmp, &|v| if v.is_array() {
-            if let Some(item) = v.get(index as usize) {
-                Some(vec![item])
+        Self::walk(vec, tmp, &|v| {
+            if v.is_array() {
+                if let Some(item) = v.get(index as usize) {
+                    Some(vec![item])
+                } else {
+                    None
+                }
             } else {
                 None
             }
-        } else {
-            None
         });
     }
 
@@ -47,13 +49,19 @@ impl<'a> ValueWalker {
         });
     }
 
-    fn walk<F>(vec: &[&'a Value], tmp: &mut Vec<&'a Value>, fun: &F) where F: Fn(&Value) -> Option<Vec<&Value>> {
+    fn walk<F>(vec: &[&'a Value], tmp: &mut Vec<&'a Value>, fun: &F)
+    where
+        F: Fn(&Value) -> Option<Vec<&Value>>,
+    {
         for v in vec {
             Self::_walk(v, tmp, fun);
         }
     }
 
-    fn _walk<F>(v: &'a Value, tmp: &mut Vec<&'a Value>, fun: &F) where F: Fn(&Value) -> Option<Vec<&Value>> {
+    fn _walk<F>(v: &'a Value, tmp: &mut Vec<&'a Value>, fun: &F)
+    where
+        F: Fn(&Value) -> Option<Vec<&Value>>,
+    {
         if let Some(mut ret) = fun(v) {
             tmp.append(&mut ret);
         }
@@ -73,10 +81,12 @@ impl<'a> ValueWalker {
         }
     }
 
-    pub fn walk_dedup(v: &'a Value,
-                      tmp: &mut Vec<&'a Value>,
-                      key: &str,
-                      visited: &mut HashSet<*const Value>, ) {
+    pub fn walk_dedup(
+        v: &'a Value,
+        tmp: &mut Vec<&'a Value>,
+        key: &str,
+        visited: &mut HashSet<*const Value>,
+    ) {
         match v {
             Value::Object(map) => {
                 if map.contains_key(key) {
@@ -96,4 +106,3 @@ impl<'a> ValueWalker {
         }
     }
 }
-

@@ -1,7 +1,8 @@
-use serde_json::{Number, Value};
 use select::cmp::*;
-use select::{FilterKey, to_f64};
+use select::{to_f64, FilterKey};
+use serde_json::{Number, Value};
 
+// Parsed form of a json path.
 #[derive(Debug, PartialEq)]
 pub(super) enum ExprTerm<'a> {
     String(String),
@@ -11,6 +12,7 @@ pub(super) enum ExprTerm<'a> {
 }
 
 impl<'a> ExprTerm<'a> {
+    // tries to match current json path with provided
     fn cmp<C1: Cmp, C2: Cmp>(
         &self,
         other: &Self,
@@ -201,11 +203,10 @@ impl<'a> Into<ExprTerm<'a>> for &Vec<&'a Value> {
     }
 }
 
-
 #[cfg(test)]
 mod expr_term_inner_tests {
-    use serde_json::{Number, Value};
     use select::expr_term::ExprTerm;
+    use serde_json::{Number, Value};
 
     #[test]
     fn value_vec_into() {

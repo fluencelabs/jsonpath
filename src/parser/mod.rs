@@ -13,8 +13,8 @@ mod utils {
     use std::str::FromStr;
 
     pub fn string_to_num<F, S: FromStr>(string: &str, msg_handler: F) -> Result<S, String>
-        where
-            F: Fn() -> String,
+    where
+        F: Fn() -> String,
     {
         match string.parse() {
             Ok(n) => Ok(n),
@@ -543,21 +543,15 @@ impl Parser {
                     _ => Self::paths(node, tokenizer),
                 }
             }
-            Ok(Token::Absolute(_)) => {
-                Self::json_path(tokenizer)
-            },
+            Ok(Token::Absolute(_)) => Self::json_path(tokenizer),
             Ok(Token::DoubleQuoted(_, _)) | Ok(Token::SingleQuoted(_, _)) => {
                 Self::array_quote_value(tokenizer)
+            }
+            Ok(Token::Key(_, key)) => match key.as_bytes()[0] {
+                b'-' | b'0'..=b'9' => Self::term_num(tokenizer),
+                _ => Self::boolean(tokenizer),
             },
-            Ok(Token::Key(_, key)) => {
-                match key.as_bytes()[0] {
-                    b'-' | b'0'..=b'9' => Self::term_num(tokenizer),
-                    _ => Self::boolean(tokenizer),
-                }
-            }
-            _ => {
-                Err(tokenizer.err_msg())
-            }
+            _ => Err(tokenizer.err_msg()),
         }
     }
 

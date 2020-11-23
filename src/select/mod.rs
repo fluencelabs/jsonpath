@@ -1,13 +1,13 @@
 use std::collections::HashSet;
 use std::fmt;
 
-use serde_json::{Number, Value};
 use serde_json::map::Entry;
+use serde_json::{Number, Value};
 
 use parser::*;
 
 use self::expr_term::*;
-use self::value_walker::ValueWalker;
+use self::value_walker::JValueWalker;
 
 mod cmp;
 mod expr_term;
@@ -83,7 +83,9 @@ impl<'a> FilterTerms<'a> {
         self.0.pop()
     }
 
-    fn filter_json_term<F: Fn(&Vec<&'a Value>, &mut Vec<&'a Value>, &mut HashSet<usize>) -> FilterKey>(
+    fn filter_json_term<
+        F: Fn(&Vec<&'a Value>, &mut Vec<&'a Value>, &mut HashSet<usize>) -> FilterKey,
+    >(
         &mut self,
         e: ExprTerm<'a>,
         fun: F,
@@ -94,36 +96,46 @@ impl<'a> FilterTerms<'a> {
             let mut tmp = Vec::new();
             let mut not_matched = HashSet::new();
             let filter_key = if let Some(FilterKey::String(key)) = fk {
-                let key_contained = &vec.iter().map(|v| match v {
-                    Value::Object(map) if map.contains_key(&key) => map.get(&key).unwrap(),
-                    _ => v,
-                }).collect();
+                let key_contained = &vec
+                    .iter()
+                    .map(|v| match v {
+                        Value::Object(map) if map.contains_key(&key) => map.get(&key).unwrap(),
+                        _ => v,
+                    })
+                    .collect();
                 fun(key_contained, &mut tmp, &mut not_matched)
             } else {
                 fun(&vec, &mut tmp, &mut not_matched)
             };
 
             if rel.is_some() {
-                self.0.push(Some(ExprTerm::Json(rel, Some(filter_key), tmp)));
+                self.0
+                    .push(Some(ExprTerm::Json(rel, Some(filter_key), tmp)));
             } else {
-                let filtered: Vec<&Value> = vec.iter().enumerate()
-                    .filter(
-                        |(idx, _)| !not_matched.contains(idx)
-                    )
+                let filtered: Vec<&Value> = vec
+                    .iter()
+                    .enumerate()
+                    .filter(|(idx, _)| !not_matched.contains(idx))
                     .map(|(_, v)| *v)
                     .collect();
 
-                self.0.push(Some(ExprTerm::Json(Some(filtered), Some(filter_key), tmp)));
+                self.0
+                    .push(Some(ExprTerm::Json(Some(filtered), Some(filter_key), tmp)));
             }
         } else {
             unreachable!("unexpected: ExprTerm: {:?}", e);
         }
     }
 
-    fn push_json_term<F: Fn(&Vec<&'a Value>, &mut Vec<&'a Value>, &mut HashSet<usize>) -> FilterKey>(
+    fn push_json_term<
+        F: Fn(&Vec<&'a Value>, &mut Vec<&'a Value>, &mut HashSet<usize>) -> FilterKey,
+        FF: Fn(&Vec<&'a Value>, &mut Vec<&'a Value>, &mut HashSet<usize>) -> FilterKey,
+    >(
         &mut self,
         current: &Option<Vec<&'a Value>>,
+        values: Option<Box<dyn ExactSizeIterator<Item = &'a Value> + 'a>>,
         fun: F,
+        fun_flattened: FF,
     ) {
         debug!("push_json_term: {:?}", &current);
 
@@ -131,68 +143,116 @@ impl<'a> FilterTerms<'a> {
             let mut tmp = Vec::new();
             let mut not_matched = HashSet::new();
             let filter_key = fun(current, &mut tmp, &mut not_matched);
-            self.0.push(Some(ExprTerm::Json(None, Some(filter_key), tmp)));
+            self.0
+                .push(Some(ExprTerm::Json(None, Some(filter_key), tmp)));
+        } else {
+            if let Some(values) = values {
+                let mut tmp = Vec::new();
+                let mut not_matched = HashSet::new();
+                let values = values.collect();
+                let filter_key = fun_flattened(&values, &mut tmp, &mut not_matched);
+                self.0
+                    .push(Some(ExprTerm::Json(None, Some(filter_key), tmp)));
+            }
         }
     }
 
-    fn filter<F: Fn(&Vec<&'a Value>, &mut Vec<&'a Value>, &mut HashSet<usize>) -> FilterKey>(
+    fn filter<
+        F: Fn(&Vec<&'a Value>, &mut Vec<&'a Value>, &mut HashSet<usize>) -> FilterKey,
+        FF: Fn(&Vec<&'a Value>, &mut Vec<&'a Value>, &mut HashSet<usize>) -> FilterKey,
+    >(
         &mut self,
         current: &Option<Vec<&'a Value>>,
+        values: Option<Box<dyn ExactSizeIterator<Item = &'a Value> + 'a>>,
         fun: F,
+        fun_flattened: FF,
     ) {
         if let Some(peek) = self.0.pop() {
             if let Some(e) = peek {
                 self.filter_json_term(e, fun);
             } else {
-                self.push_json_term(current, fun);
+                self.push_json_term(current, values, fun, fun_flattened);
             }
         }
     }
 
-    fn filter_all_with_str(&mut self, current: &Option<Vec<&'a Value>>, key: &str) {
-        self.filter(current, |vec, tmp, _| {
-            ValueWalker::all_with_str(&vec, tmp, key, true);
-            FilterKey::All
-        });
+    fn filter_all_with_str(
+        &mut self,
+        current: &Option<Vec<&'a Value>>,
+        values: Option<Box<dyn ExactSizeIterator<Item = &'a Value> + 'a>>,
+        key: &str,
+    ) {
+        self.filter(
+            current,
+            values,
+            |vec, tmp, _| {
+                JValueWalker::all_with_str(&vec, tmp, key, true);
+                FilterKey::All
+            },
+            |_, _, _| FilterKey::All,
+        );
 
         debug!("filter_all_with_str : {}, {:?}", key, self.0);
     }
 
-    fn filter_next_with_str(&mut self, current: &Option<Vec<&'a Value>>, key: &str) {
-        self.filter(current, |vec, tmp, not_matched| {
-            let mut visited = HashSet::new();
-            for (idx, v) in vec.iter().enumerate() {
-                match v {
-                    Value::Object(map) => {
-                        if map.contains_key(key) {
-                            let ptr = *v as *const Value;
-                            if !visited.contains(&ptr) {
-                                visited.insert(ptr);
-                                tmp.push(v)
+    fn filter_next_with_str(
+        &mut self,
+        current: &Option<Vec<&'a Value>>,
+        values: Option<Box<dyn ExactSizeIterator<Item = &'a Value> + 'a>>,
+        key: &str,
+    ) {
+        self.filter(
+            current,
+            values,
+            |vec, tmp, not_matched| {
+                let mut visited = HashSet::new();
+                for (idx, v) in vec.iter().enumerate() {
+                    match v {
+                        Value::Object(map) => {
+                            if map.contains_key(key) {
+                                let ptr = *v as *const Value;
+                                if !visited.contains(&ptr) {
+                                    visited.insert(ptr);
+                                    tmp.push(v)
+                                }
+                            } else {
+                                not_matched.insert(idx);
                             }
-                        } else {
+                        }
+                        Value::Array(vec) => {
+                            not_matched.insert(idx);
+                            for v in vec {
+                                JValueWalker::walk_dedup(v, tmp, key, &mut visited);
+                            }
+                        }
+                        _ => {
                             not_matched.insert(idx);
                         }
                     }
-                    Value::Array(vec) => {
-                        not_matched.insert(idx);
-                        for v in vec {
-                            ValueWalker::walk_dedup(v, tmp, key, &mut visited);
-                        }
-                    }
-                    _ => {
-                        not_matched.insert(idx);
-                    }
                 }
-            }
 
-            FilterKey::String(key.to_owned())
-        });
+                FilterKey::String(key.to_owned())
+            },
+            |vec, tmp, not_matched| {
+                let mut visited = HashSet::new();
+                for (idx, v) in vec.iter().enumerate() {
+                    not_matched.insert(idx);
+                    JValueWalker::walk_dedup(v, tmp, key, &mut visited);
+                }
+
+                FilterKey::String(key.to_owned())
+            },
+        );
 
         debug!("filter_next_with_str : {}, {:?}", key, self.0);
     }
 
-    fn collect_next_with_num(&mut self, current: &Option<Vec<&'a Value>>, index: f64) -> Option<Vec<&'a Value>> {
+    fn collect_next_with_num(
+        &mut self,
+        current: &Option<Vec<&'a Value>>,
+        values: Option<Box<dyn ExactSizeIterator<Item = &'a Value> + 'a>>,
+        index: f64,
+    ) -> (Option<Vec<&'a Value>>, Option<Vec<usize>>) {
         fn _collect<'a>(tmp: &mut Vec<&'a Value>, vec: &'a [Value], index: f64) {
             let index = abs_index(index as isize, vec.len());
             if let Some(v) = vec.get(index) {
@@ -220,21 +280,34 @@ impl<'a> FilterTerms<'a> {
 
             if tmp.is_empty() {
                 self.0.pop();
-                return Some(vec![]);
+                return (Some(vec![]), None);
             } else {
-                return Some(tmp);
+                return (Some(tmp), None);
             }
         }
 
-        debug!(
-            "collect_next_with_num : {:?}, {:?}",
-            &index, &current
-        );
+        if let Some(mut values) = values {
+            let index = abs_index(index as isize, values.len());
 
-        None
+            match values.nth(index) {
+                Some(value) => return (Some(vec![value]), Some(vec![index])),
+                None => {
+                    self.0.pop();
+                    return (Some(vec![]), None);
+                }
+            }
+        }
+
+        debug!("collect_next_with_num : {:?}, {:?}", &index, &current);
+
+        (None, None)
     }
 
-    fn collect_next_all(&mut self, current: &Option<Vec<&'a Value>>) -> Option<Vec<&'a Value>> {
+    fn collect_next_all(
+        &mut self,
+        current: &Option<Vec<&'a Value>>,
+        values: Option<Box<dyn ExactSizeIterator<Item = &'a Value> + 'a>>,
+    ) -> (Option<Vec<&'a Value>>, Option<Vec<usize>>) {
         if let Some(current) = current {
             let mut tmp = Vec::new();
             for c in current {
@@ -252,15 +325,27 @@ impl<'a> FilterTerms<'a> {
                     _ => {}
                 }
             }
-            return Some(tmp);
+            return (Some(tmp), None);
+        }
+
+        if let Some(current) = values {
+            let values = current.collect::<Vec<_>>();
+
+            let values_len = values.len();
+            return (Some(values), Some((0..values_len).collect()));
         }
 
         debug!("collect_next_all : {:?}", &current);
 
-        None
+        (None, None)
     }
 
-    fn collect_next_with_str(&mut self, current: &Option<Vec<&'a Value>>, keys: &[String]) -> Option<Vec<&'a Value>> {
+    fn collect_next_with_str(
+        &mut self,
+        current: &Option<Vec<&'a Value>>,
+        values: Option<Box<dyn ExactSizeIterator<Item = &'a Value> + 'a>>,
+        keys: &[String],
+    ) -> (Option<Vec<&'a Value>>, Option<Vec<usize>>) {
         if let Some(current) = current {
             let mut tmp = Vec::new();
             for c in current {
@@ -275,63 +360,99 @@ impl<'a> FilterTerms<'a> {
 
             if tmp.is_empty() {
                 self.0.pop();
-                return Some(vec![]);
+                return (Some(vec![]), None);
             } else {
-                return Some(tmp);
+                return (Some(tmp), None);
             }
         }
 
-        debug!(
-            "collect_next_with_str : {:?}, {:?}",
-            keys, &current
-        );
+        if values.is_some() {
+            // values has array-like structure
+            self.0.pop();
+            return (Some(vec![]), None);
+        }
 
-        None
+        debug!("collect_next_with_str : {:?}, {:?}", keys, &current);
+
+        (None, None)
     }
 
-    fn collect_all(&mut self, current: &Option<Vec<&'a Value>>) -> Option<Vec<&'a Value>> {
+    fn collect_all(
+        &mut self,
+        current: &Option<Vec<&'a Value>>,
+        values: Option<Box<dyn ExactSizeIterator<Item = &'a Value> + 'a>>,
+    ) -> (Option<Vec<&'a Value>>, Option<Vec<usize>>) {
         if let Some(current) = current {
             let mut tmp = Vec::new();
-            ValueWalker::all(&current, &mut tmp);
-            return Some(tmp);
+            JValueWalker::all(&current, &mut tmp);
+            return (Some(tmp), None);
+        }
+
+        if let Some(values) = values {
+            let values = values.collect::<Vec<_>>();
+            let values_len = values.len();
+            return (Some(values), Some((0..values_len).collect()));
         }
         debug!("collect_all: {:?}", &current);
 
-        None
+        (None, None)
     }
 
-    fn collect_all_with_str(&mut self, current: &Option<Vec<&'a Value>>, key: &str) -> Option<Vec<&'a Value>> {
+    fn collect_all_with_str(
+        &mut self,
+        current: &Option<Vec<&'a Value>>,
+        values: Option<Box<dyn ExactSizeIterator<Item = &'a Value> + 'a>>,
+        key: &str,
+    ) -> (Option<Vec<&'a Value>>, Option<Vec<usize>>) {
         if let Some(current) = current {
             let mut tmp = Vec::new();
-            ValueWalker::all_with_str(&current, &mut tmp, key, false);
-            return Some(tmp);
+            JValueWalker::all_with_str(&current, &mut tmp, key, false);
+            return (Some(tmp), None);
+        }
+
+        if values.is_some() {
+            return (Some(vec![]), None);
         }
 
         debug!("collect_all_with_str: {}, {:?}", key, &current);
 
-        None
+        (None, None)
     }
 
-    fn collect_all_with_num(&mut self, current: &Option<Vec<&'a Value>>, index: f64) -> Option<Vec<&'a Value>> {
+    fn collect_all_with_num(
+        &mut self,
+        current: &Option<Vec<&'a Value>>,
+        values: Option<Box<dyn ExactSizeIterator<Item = &'a Value> + 'a>>,
+        index: f64,
+    ) -> (Option<Vec<&'a Value>>, Option<Vec<usize>>) {
         if let Some(current) = current {
             let mut tmp = Vec::new();
-            ValueWalker::all_with_num(&current, &mut tmp, index);
-            return Some(tmp);
+            JValueWalker::all_with_num(&current, &mut tmp, index);
+            return (Some(tmp), None);
+        }
+
+        if let Some(mut values) = values {
+            match values.nth(index as usize) {
+                Some(value) => return (Some(vec![value]), Some(vec![index as usize])),
+                None => return (Some(vec![]), None),
+            }
         }
 
         debug!("collect_all_with_num: {}, {:?}", index, &current);
 
-        None
+        (None, None)
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct Selector<'a, 'b> {
     node: Option<Node>,
     node_ref: Option<&'b Node>,
     value: Option<&'a Value>,
     tokens: Vec<ParseToken>,
     current: Option<Vec<&'a Value>>,
+    values: Option<Box<dyn ExactSizeIterator<Item = &'a Value> + 'a>>,
+    chose_indices: Vec<usize>,
     selectors: Vec<Selector<'a, 'b>>,
     selector_filter: FilterTerms<'a>,
 }
@@ -373,6 +494,14 @@ impl<'a, 'b> Selector<'a, 'b> {
 
     pub fn value(&mut self, v: &'a Value) -> &mut Self {
         self.value = Some(v);
+        self
+    }
+
+    pub fn values_iter(
+        &mut self,
+        values: impl Iterator<Item = &'a Value> + ExactSizeIterator + 'a,
+    ) -> &mut Self {
+        self.values = Some(Box::new(values));
         self
     }
 
@@ -432,6 +561,15 @@ impl<'a, 'b> Selector<'a, 'b> {
         }
     }
 
+    pub fn select_(&mut self) -> Result<Vec<&'a Value>, JsonPathError> {
+        self._select()?;
+
+        match &self.current {
+            Some(r) => Ok(r.to_vec()),
+            _ => Err(JsonPathError::EmptyValue),
+        }
+    }
+
     fn compute_absolute_path_filter(&mut self, token: &ParseToken) -> bool {
         if !self.selectors.is_empty() {
             match token {
@@ -471,8 +609,14 @@ impl<'a, 'b> Selector<'a, 'b> {
             if let Some(value) = self.value {
                 selector.value = Some(value);
                 selector.current = Some(vec![value]);
+
+                println!("current.is_some: {:?}", selector.current);
                 self.selectors.push(selector);
             }
+            return;
+        }
+
+        if self.values.is_some() {
             return;
         }
 
@@ -485,8 +629,13 @@ impl<'a, 'b> Selector<'a, 'b> {
         if let Some(ParseToken::Array) = self.tokens.last() {
             let array_token = self.tokens.pop();
             if let Some(ParseToken::Leaves) = self.tokens.last() {
+                let values = std::mem::replace(&mut self.values, None);
                 self.tokens.pop();
-                self.current = self.selector_filter.collect_all(&self.current);
+                let (current, chose_indices) =
+                    self.selector_filter.collect_all(&self.current, values);
+
+                self.current = current;
+                self.chose_indices.extend(chose_indices.unwrap_or_default());
             }
             self.tokens.push(array_token.unwrap());
         }
@@ -496,8 +645,10 @@ impl<'a, 'b> Selector<'a, 'b> {
     fn visit_array_eof(&mut self) {
         if self.is_last_before_token_match(ParseToken::Array) {
             if let Some(Some(e)) = self.selector_filter.pop_term() {
+                let values = std::mem::replace(&mut self.values, None);
                 if let ExprTerm::String(key) = e {
-                    self.selector_filter.filter_next_with_str(&self.current, &key);
+                    self.selector_filter
+                        .filter_next_with_str(&self.current, values, &key);
                     self.tokens.pop();
                     return;
                 }
@@ -510,22 +661,36 @@ impl<'a, 'b> Selector<'a, 'b> {
             self.tokens.pop();
             self.tokens.pop();
             if let Some(Some(e)) = self.selector_filter.pop_term() {
-                let selector_filter_consumed = match &e {
-                    ExprTerm::Number(n) => {
-                        self.current = self.selector_filter.collect_all_with_num(&self.current, to_f64(n));
-                        self.selector_filter.pop_term();
-                        true
-                    }
-                    ExprTerm::String(key) => {
-                        self.current = self.selector_filter.collect_all_with_str(&self.current, key);
-                        self.selector_filter.pop_term();
-                        true
-                    }
-                    _ => {
-                        self.selector_filter.push_term(Some(e));
-                        false
-                    }
-                };
+                let selector_filter_consumed =
+                    match &e {
+                        ExprTerm::Number(n) => {
+                            let values = std::mem::replace(&mut self.values, None);
+                            let (current, chose_indices) = self
+                                .selector_filter
+                                .collect_all_with_num(&self.current, values, to_f64(n));
+
+                            self.selector_filter.pop_term();
+
+                            self.current = current;
+                            self.chose_indices.extend(chose_indices.unwrap_or_default());
+                            true
+                        }
+                        ExprTerm::String(key) => {
+                            let values = std::mem::replace(&mut self.values, None);
+                            let (current, chose_indices) = self
+                                .selector_filter
+                                .collect_all_with_str(&self.current, values, key);
+
+                            self.selector_filter.pop_term();
+                            self.current = current;
+                            self.chose_indices.extend(chose_indices.unwrap_or_default());
+                            true
+                        }
+                        _ => {
+                            self.selector_filter.push_term(Some(e));
+                            false
+                        }
+                    };
 
                 if selector_filter_consumed {
                     return;
@@ -536,10 +701,25 @@ impl<'a, 'b> Selector<'a, 'b> {
         if let Some(Some(e)) = self.selector_filter.pop_term() {
             match e {
                 ExprTerm::Number(n) => {
-                    self.current = self.selector_filter.collect_next_with_num(&self.current, to_f64(&n));
+                    let values = std::mem::replace(&mut self.values, None);
+                    let (current, chose_indices) = self.selector_filter.collect_next_with_num(
+                        &self.current,
+                        values,
+                        to_f64(&n),
+                    );
+
+                    self.current = current;
+                    self.chose_indices.extend(chose_indices.unwrap_or_default());
                 }
                 ExprTerm::String(key) => {
-                    self.current = self.selector_filter.collect_next_with_str(&self.current, &[key]);
+                    let values = std::mem::replace(&mut self.values, None);
+
+                    let (current, chose_indices) =
+                        self.selector_filter
+                            .collect_next_with_str(&self.current, values, &[key]);
+
+                    self.current = current;
+                    self.chose_indices.extend(chose_indices.unwrap_or_default());
                 }
                 ExprTerm::Json(rel, _, v) => {
                     if v.is_empty() {
@@ -573,24 +753,38 @@ impl<'a, 'b> Selector<'a, 'b> {
             self.tokens.pop();
         }
 
+        let values = std::mem::replace(&mut self.values, None);
         match self.tokens.last() {
             Some(ParseToken::Leaves) => {
                 self.tokens.pop();
-                self.current = self.selector_filter.collect_all(&self.current);
+                let (current, chose_indices) =
+                    self.selector_filter.collect_all(&self.current, values);
+
+                self.current = current;
+                self.chose_indices.extend(chose_indices.unwrap_or_default());
             }
             Some(ParseToken::In) => {
                 self.tokens.pop();
-                self.current = self.selector_filter.collect_next_all(&self.current);
+                let (current, chose_indices) =
+                    self.selector_filter.collect_next_all(&self.current, values);
+
+                self.current = current;
+                self.chose_indices.extend(chose_indices.unwrap_or_default());
             }
             _ => {
-                self.current = self.selector_filter.collect_next_all(&self.current);
+                let (current, chose_indices) =
+                    self.selector_filter.collect_next_all(&self.current, values);
+
+                self.current = current;
+                self.chose_indices.extend(chose_indices.unwrap_or_default());
             }
         }
     }
 
     fn visit_key(&mut self, key: &str) {
         if let Some(ParseToken::Array) = self.tokens.last() {
-            self.selector_filter.push_term(Some(ExprTerm::String(key.to_string())));
+            self.selector_filter
+                .push_term(Some(ExprTerm::String(key.to_string())));
             return;
         }
 
@@ -598,20 +792,38 @@ impl<'a, 'b> Selector<'a, 'b> {
             if self.selector_filter.is_term_empty() {
                 match t {
                     ParseToken::Leaves => {
-                        self.current = self.selector_filter.collect_all_with_str(&self.current, key)
+                        let values = std::mem::replace(&mut self.values, None);
+                        let (current, chose_indices) =
+                            self.selector_filter
+                                .collect_all_with_str(&self.current, values, key);
+
+                        self.current = current;
+                        self.chose_indices.extend(chose_indices.unwrap_or_default());
                     }
                     ParseToken::In => {
-                        self.current = self.selector_filter.collect_next_with_str(&self.current, &[key.to_string()])
+                        let values = std::mem::replace(&mut self.values, None);
+                        let (current, chose_indices) = self.selector_filter.collect_next_with_str(
+                            &self.current,
+                            values,
+                            &[key.to_string()],
+                        );
+
+                        self.current = current;
+                        self.chose_indices.extend(chose_indices.unwrap_or_default());
                     }
                     _ => {}
                 }
             } else {
                 match t {
                     ParseToken::Leaves => {
-                        self.selector_filter.filter_all_with_str(&self.current, key);
+                        let values = std::mem::replace(&mut self.values, None);
+                        self.selector_filter
+                            .filter_all_with_str(&self.current, values, key);
                     }
                     ParseToken::In => {
-                        self.selector_filter.filter_next_with_str(&self.current, key);
+                        let values = std::mem::replace(&mut self.values, None);
+                        self.selector_filter
+                            .filter_next_with_str(&self.current, values, key);
                     }
                     _ => {}
                 }
@@ -625,7 +837,12 @@ impl<'a, 'b> Selector<'a, 'b> {
         }
 
         if let Some(ParseToken::Array) = self.tokens.pop() {
-            self.current = self.selector_filter.collect_next_with_str(&self.current, keys);
+            let values = std::mem::replace(&mut self.values, None);
+            let (current, chose_indices) =
+                self.selector_filter
+                    .collect_next_with_str(&self.current, values, keys);
+            self.current = current;
+            self.chose_indices.extend(chose_indices.unwrap_or_default());
         } else {
             unreachable!();
         }
@@ -685,27 +902,53 @@ impl<'a, 'b> Selector<'a, 'b> {
             if let Some(current) = &self.current {
                 for v in current {
                     if let Value::Array(vec) = v {
-                        let from = if let Some(from) = from {
-                            abs_index(*from, vec.len())
-                        } else {
-                            0
+                        let from = match from {
+                            Some(from) => abs_index(*from, vec.len()),
+                            None => 0,
                         };
 
-                        let to = if let Some(to) = to {
-                            abs_index(*to, vec.len())
-                        } else {
-                            vec.len()
+                        let to = match to {
+                            Some(to) => abs_index(*to, vec.len()),
+                            None => vec.len(),
                         };
 
-                        for i in (from..to).step_by(match step {
+                        let step = match step {
                             Some(step) => *step,
-                            _ => 1,
-                        }) {
+                            None => 1,
+                        };
+
+                        for i in (from..to).step_by(step) {
                             if let Some(v) = vec.get(i) {
                                 tmp.push(v);
                             }
                         }
                     }
+                }
+            } else {
+                let values = std::mem::replace(&mut self.values, None);
+                if let Some(values) = values {
+                    let from = match from {
+                        Some(from) => abs_index(*from, values.len()),
+                        None => 0,
+                    };
+
+                    let to = match to {
+                        Some(to) => abs_index(*to, values.len()),
+                        None => values.len(),
+                    };
+
+                    let step = match step {
+                        Some(step) => *step,
+                        None => 1,
+                    };
+
+                    let take_count = if from > to { 0 } else { to - from };
+
+                    let matched_values = values.skip(from).step_by(step).take(take_count);
+                    tmp.extend(matched_values);
+
+                    self.chose_indices
+                        .extend((from..to).step_by(step).collect::<Vec<_>>())
                 }
             }
             self.current = Some(tmp);
@@ -731,12 +974,31 @@ impl<'a, 'b> Selector<'a, 'b> {
                         }
                     }
                 }
+            } else {
+                let indices = indices.iter().map(|&v| v as usize).collect::<HashSet<_>>();
+                let values = std::mem::replace(&mut self.values, None);
+                if let Some(values) = values {
+                    let new_values = values
+                        .enumerate()
+                        .filter(|(id, _)| indices.contains(id))
+                        .map(|(id, value)| {
+                            self.chose_indices.push(id);
+                            value
+                        })
+                        .collect::<Vec<_>>();
+
+                    tmp.extend(new_values);
+                }
             }
 
             self.current = Some(tmp);
         } else {
             unreachable!();
         }
+    }
+
+    pub fn chose_indices(self) -> Vec<usize> {
+        self.chose_indices
     }
 }
 
@@ -762,7 +1024,8 @@ impl<'a, 'b> NodeVisitor for Selector<'a, 'b> {
             ParseToken::Key(key) => self.visit_key(key),
             ParseToken::Keys(keys) => self.visit_keys(keys),
             ParseToken::Number(v) => {
-                self.selector_filter.push_term(Some(ExprTerm::Number(Number::from_f64(*v).unwrap())));
+                self.selector_filter
+                    .push_term(Some(ExprTerm::Number(Number::from_f64(*v).unwrap())));
             }
             ParseToken::Filter(ref ft) => self.visit_filter(ft),
             ParseToken::Range(from, to, step) => self.visit_range(from, to, step),
@@ -960,7 +1223,6 @@ impl SelectorMut {
         Ok(self)
     }
 }
-
 
 #[cfg(test)]
 mod select_inner_tests {

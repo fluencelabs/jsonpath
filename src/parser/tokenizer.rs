@@ -66,95 +66,95 @@ impl Token {
         match self {
             Token::Absolute(_) => match other {
                 Token::Absolute(_) => true,
-                _ => false
+                _ => false,
             },
             Token::Dot(_) => match other {
                 Token::Dot(_) => true,
-                _ => false
+                _ => false,
             },
             Token::At(_) => match other {
                 Token::At(_) => true,
-                _ => false
+                _ => false,
             },
             Token::OpenArray(_) => match other {
                 Token::OpenArray(_) => true,
-                _ => false
+                _ => false,
             },
             Token::CloseArray(_) => match other {
                 Token::CloseArray(_) => true,
-                _ => false
+                _ => false,
             },
             Token::Asterisk(_) => match other {
                 Token::Asterisk(_) => true,
-                _ => false
+                _ => false,
             },
             Token::Question(_) => match other {
                 Token::Question(_) => true,
-                _ => false
+                _ => false,
             },
             Token::Comma(_) => match other {
                 Token::Comma(_) => true,
-                _ => false
+                _ => false,
             },
             Token::Split(_) => match other {
                 Token::Split(_) => true,
-                _ => false
+                _ => false,
             },
             Token::OpenParenthesis(_) => match other {
                 Token::OpenParenthesis(_) => true,
-                _ => false
+                _ => false,
             },
             Token::CloseParenthesis(_) => match other {
                 Token::CloseParenthesis(_) => true,
-                _ => false
+                _ => false,
             },
             Token::Key(_, _) => match other {
                 Token::Key(_, _) => true,
-                _ => false
+                _ => false,
             },
             Token::DoubleQuoted(_, _) => match other {
                 Token::DoubleQuoted(_, _) => true,
-                _ => false
+                _ => false,
             },
             Token::SingleQuoted(_, _) => match other {
                 Token::SingleQuoted(_, _) => true,
-                _ => false
+                _ => false,
             },
             Token::Equal(_) => match other {
                 Token::Equal(_) => true,
-                _ => false
+                _ => false,
             },
             Token::GreaterOrEqual(_) => match other {
                 Token::GreaterOrEqual(_) => true,
-                _ => false
+                _ => false,
             },
             Token::Greater(_) => match other {
                 Token::Greater(_) => true,
-                _ => false
+                _ => false,
             },
             Token::Little(_) => match other {
                 Token::Little(_) => true,
-                _ => false
+                _ => false,
             },
             Token::LittleOrEqual(_) => match other {
                 Token::LittleOrEqual(_) => true,
-                _ => false
+                _ => false,
             },
             Token::NotEqual(_) => match other {
                 Token::NotEqual(_) => true,
-                _ => false
+                _ => false,
             },
             Token::And(_) => match other {
                 Token::And(_) => true,
-                _ => false
+                _ => false,
             },
             Token::Or(_) => match other {
                 Token::Or(_) => true,
-                _ => false
+                _ => false,
             },
             Token::Whitespace(_, _) => match other {
                 Token::Whitespace(_, _) => true,
-                _ => false
+                _ => false,
             },
         }
     }
@@ -174,23 +174,9 @@ impl<'a> Tokenizer<'a> {
 
     fn dolla(&mut self, pos: usize, ch: char) -> Result<Token, TokenError> {
         let fun = |c: &char| match c {
-            &CH_DOT
-            | &CH_ASTERISK
-            | &CH_LARRAY
-            | &CH_RARRAY
-            | &CH_LPAREN
-            | &CH_RPAREN
-            | &CH_AT
-            | &CH_QUESTION
-            | &CH_COMMA
-            | &CH_SEMICOLON
-            | &CH_LITTLE
-            | &CH_GREATER
-            | &CH_EQUAL
-            | &CH_AMPERSAND
-            | &CH_PIPE
-            | &CH_EXCLAMATION
-            => false,
+            &CH_DOT | &CH_ASTERISK | &CH_LARRAY | &CH_RARRAY | &CH_LPAREN | &CH_RPAREN | &CH_AT
+            | &CH_QUESTION | &CH_COMMA | &CH_SEMICOLON | &CH_LITTLE | &CH_GREATER | &CH_EQUAL
+            | &CH_AMPERSAND | &CH_PIPE | &CH_EXCLAMATION => false,
             _ => !c.is_whitespace(),
         };
         let (_, mut vec) = self.input.take_while(fun).map_err(to_token_error)?;
@@ -312,24 +298,9 @@ impl<'a> Tokenizer<'a> {
 
     fn other(&mut self, pos: usize, ch: char) -> Result<Token, TokenError> {
         let fun = |c: &char| match c {
-            &CH_DOLLA
-            | &CH_DOT
-            | &CH_ASTERISK
-            | &CH_LARRAY
-            | &CH_RARRAY
-            | &CH_LPAREN
-            | &CH_RPAREN
-            | &CH_AT
-            | &CH_QUESTION
-            | &CH_COMMA
-            | &CH_SEMICOLON
-            | &CH_LITTLE
-            | &CH_GREATER
-            | &CH_EQUAL
-            | &CH_AMPERSAND
-            | &CH_PIPE
-            | &CH_EXCLAMATION
-            => false,
+            &CH_DOLLA | &CH_DOT | &CH_ASTERISK | &CH_LARRAY | &CH_RARRAY | &CH_LPAREN
+            | &CH_RPAREN | &CH_AT | &CH_QUESTION | &CH_COMMA | &CH_SEMICOLON | &CH_LITTLE
+            | &CH_GREATER | &CH_EQUAL | &CH_AMPERSAND | &CH_PIPE | &CH_EXCLAMATION => false,
             _ => !c.is_whitespace(),
         };
         let (_, mut vec) = self.input.take_while(fun).map_err(to_token_error)?;
