@@ -40,6 +40,7 @@ enum FilterKey {
 pub enum JsonPathError {
     EmptyPath,
     EmptyValue,
+    CantFlatten(Vec<Value>),
     Path(String),
     Serde(String),
 }
@@ -55,6 +56,9 @@ impl fmt::Display for JsonPathError {
         match self {
             JsonPathError::EmptyPath => f.write_str("path not set"),
             JsonPathError::EmptyValue => f.write_str("json value not set"),
+            JsonPathError::CantFlatten(values) => {
+                write!(f, "json value '{:?}' can't be flattened", values)
+            }
             JsonPathError::Path(msg) => f.write_str(&format!("path error: \n{}\n", msg)),
             JsonPathError::Serde(msg) => f.write_str(&format!("serde error: \n{}\n", msg)),
         }
@@ -455,6 +459,7 @@ pub struct Selector<'a, 'b> {
     chose_indices: Vec<usize>,
     selectors: Vec<Selector<'a, 'b>>,
     selector_filter: FilterTerms<'a>,
+    should_flatten_arrays: bool,
 }
 
 impl<'a, 'b> Selector<'a, 'b> {
@@ -464,6 +469,15 @@ impl<'a, 'b> Selector<'a, 'b> {
 
     pub fn str_path(&mut self, path: &str) -> Result<&mut Self, JsonPathError> {
         debug!("path : {}", path);
+
+        let path = match path.strip_suffix('!') {
+            Some(path) => {
+                self.should_flatten_arrays = true;
+                path
+            }
+            None => path,
+        };
+
         self.node_ref.take();
         self.node = Some(Parser::compile(path).map_err(JsonPathError::Path)?);
         Ok(self)
@@ -556,7 +570,27 @@ impl<'a, 'b> Selector<'a, 'b> {
         self._select()?;
 
         match &self.current {
-            Some(r) => Ok(r.to_vec()),
+            Some(r) => {
+                if self.should_flatten_arrays {
+                    if r.len() != 1 {
+                        let value = r.iter().map(|&v| v.clone()).collect::<Vec<_>>();
+                        return Err(JsonPathError::CantFlatten(value));
+                    }
+                    let value = r[0];
+
+                    return match value {
+                        Value::Array(array) => {
+                            let result: Vec<&Value> = array.iter().map(|v| v).collect::<Vec<_>>();
+                            Ok(result)
+                        }
+                        _ => {
+                            let value = r.iter().map(|&v| v.clone()).collect::<Vec<_>>();
+                            Err(JsonPathError::CantFlatten(value))
+                        }
+                    };
+                }
+                Ok(r.to_vec())
+            }
             _ => Err(JsonPathError::EmptyValue),
         }
     }

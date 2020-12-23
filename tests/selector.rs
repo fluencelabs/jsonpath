@@ -175,3 +175,16 @@ fn iter_test() {
 
     assert_eq!(result, vec![&json!([1, 2, 3, 4])]);
 }
+
+#[test]
+fn flattening_test() {
+    let array = vec![1, 2, 3, 4, 5];
+    let json_array = json!(array);
+    let haystack = json!([json_array]);
+    let result = jsonpath::select(&haystack, "$.[0]!").unwrap();
+    assert_eq!(result, array);
+
+    let haystack = json!({ "array": array });
+    let result = jsonpath::select(&haystack, "$.array!").unwrap();
+    assert_eq!(result, array);
+}
