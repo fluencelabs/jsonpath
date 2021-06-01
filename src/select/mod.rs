@@ -1030,8 +1030,6 @@ impl<'a, 'b> Selector<'a, 'b> {
     }
 
     fn update_not_found_by_current(&mut self) {
-        println!("current: {:?}", self.current);
-
         if let Some(values) = &self.current {
             self.not_found_by_key_index |= values.is_empty();
         }
