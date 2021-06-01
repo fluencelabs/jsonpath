@@ -180,13 +180,21 @@ fn iter_test() {
 fn test_not_found_by_index() {
     let array = vec![1, 2, 3, 4, 5];
     let haystack = json!(array);
-    let result = jsonpath::select(&haystack, "$.[6]");
+
+    let result = jsonpath::select(&haystack, "$.[4]").unwrap();
+    assert_eq!(result, vec![5]);
+
+    let result = jsonpath::select(&haystack, "$.[5]");
     assert!(result.is_err());
 }
 
 #[test]
 fn test_not_found_by_key() {
     let haystack = json!({"asd": 1});
+
+    let result = jsonpath::select(&haystack, "$.asd").unwrap();
+    assert_eq!(result, vec![1]);
+
     let result = jsonpath::select(&haystack, "$.aaa");
     assert!(result.is_err());
 }
