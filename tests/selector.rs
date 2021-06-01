@@ -130,7 +130,7 @@ fn iter_test() {
     struct T {
         pub value: Rc<Value>,
         pub tt: i32,
-    };
+    }
 
     let t = Value::Array(vec![
         Value::String(String::from("vv")),
@@ -177,14 +177,16 @@ fn iter_test() {
 }
 
 #[test]
-fn flattening_test() {
+fn test_not_found_by_index() {
     let array = vec![1, 2, 3, 4, 5];
-    let json_array = json!(array);
-    let haystack = json!([json_array]);
-    let result = jsonpath::select(&haystack, "$.[0]!").unwrap();
-    assert_eq!(result, array);
+    let haystack = json!(array);
+    let result = jsonpath::select(&haystack, "$.[6]");
+    assert!(result.is_err());
+}
 
-    let haystack = json!({ "array": array });
-    let result = jsonpath::select(&haystack, "$.array!").unwrap();
-    assert_eq!(result, array);
+#[test]
+fn test_not_found_by_key() {
+    let haystack = json!({"asd": 1});
+    let result = jsonpath::select(&haystack, "$.aaa");
+    assert!(result.is_err());
 }

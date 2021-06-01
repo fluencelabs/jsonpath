@@ -457,9 +457,10 @@ pub struct Selector<'a, 'b> {
     current: Option<Vec<&'a Value>>,
     values: Option<Box<dyn ExactSizeIterator<Item = &'a Value> + 'a>>,
     chose_indices: Vec<usize>,
+    // true if values haven't been found by key or index in JValue
+    not_found_by_key_index: bool,
     selectors: Vec<Selector<'a, 'b>>,
     selector_filter: FilterTerms<'a>,
-    should_flatten_arrays: bool,
 }
 
 impl<'a, 'b> Selector<'a, 'b> {
@@ -469,14 +470,6 @@ impl<'a, 'b> Selector<'a, 'b> {
 
     pub fn str_path(&mut self, path: &str) -> Result<&mut Self, JsonPathError> {
         debug!("path : {}", path);
-
-        let path = match path.strip_suffix('!') {
-            Some(path) => {
-                self.should_flatten_arrays = true;
-                path
-            }
-            None => path,
-        };
 
         self.node_ref.take();
         self.node = Some(Parser::compile(path).map_err(JsonPathError::Path)?);
@@ -523,7 +516,12 @@ impl<'a, 'b> Selector<'a, 'b> {
         if self.node_ref.is_some() {
             let node_ref = self.node_ref.take().unwrap();
             self.visit(node_ref);
-            return Ok(());
+
+            return if self.not_found_by_key_index {
+                Err(JsonPathError::EmptyValue)
+            } else {
+                Ok(())
+            };
         }
 
         if self.node.is_none() {
@@ -534,7 +532,11 @@ impl<'a, 'b> Selector<'a, 'b> {
         self.visit(&node);
         self.node = Some(node);
 
-        Ok(())
+        if self.not_found_by_key_index {
+            Err(JsonPathError::EmptyValue)
+        } else {
+            Ok(())
+        }
     }
 
     pub fn select_as<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, JsonPathError> {
@@ -570,27 +572,7 @@ impl<'a, 'b> Selector<'a, 'b> {
         self._select()?;
 
         match &self.current {
-            Some(r) => {
-                if self.should_flatten_arrays {
-                    if r.len() != 1 {
-                        let value = r.iter().map(|&v| v.clone()).collect::<Vec<_>>();
-                        return Err(JsonPathError::CantFlatten(value));
-                    }
-                    let value = r[0];
-
-                    return match value {
-                        Value::Array(array) => {
-                            let result: Vec<&Value> = array.iter().map(|v| v).collect::<Vec<_>>();
-                            Ok(result)
-                        }
-                        _ => {
-                            let value = r.iter().map(|&v| v.clone()).collect::<Vec<_>>();
-                            Err(JsonPathError::CantFlatten(value))
-                        }
-                    };
-                }
-                Ok(r.to_vec())
-            }
+            Some(r) => Ok(r.to_vec()),
             _ => Err(JsonPathError::EmptyValue),
         }
     }
@@ -669,6 +651,8 @@ impl<'a, 'b> Selector<'a, 'b> {
                     self.selector_filter.collect_all(&self.current, values);
 
                 self.current = current;
+                self.update_not_found_by_current();
+
                 self.chose_indices.extend(chose_indices.unwrap_or_default());
             }
             self.tokens.push(array_token.unwrap());
@@ -706,6 +690,8 @@ impl<'a, 'b> Selector<'a, 'b> {
                             self.selector_filter.pop_term();
 
                             self.current = current;
+                            self.update_not_found_by_current();
+
                             self.chose_indices.extend(chose_indices.unwrap_or_default());
                             true
                         }
@@ -717,6 +703,8 @@ impl<'a, 'b> Selector<'a, 'b> {
 
                             self.selector_filter.pop_term();
                             self.current = current;
+                            self.update_not_found_by_current();
+
                             self.chose_indices.extend(chose_indices.unwrap_or_default());
                             true
                         }
@@ -743,6 +731,8 @@ impl<'a, 'b> Selector<'a, 'b> {
                     );
 
                     self.current = current;
+                    self.update_not_found_by_current();
+
                     self.chose_indices.extend(chose_indices.unwrap_or_default());
                 }
                 ExprTerm::String(key) => {
@@ -753,6 +743,8 @@ impl<'a, 'b> Selector<'a, 'b> {
                             .collect_next_with_str(&self.current, values, &[key]);
 
                     self.current = current;
+                    self.update_not_found_by_current();
+
                     self.chose_indices.extend(chose_indices.unwrap_or_default());
                 }
                 ExprTerm::Json(rel, _, v) => {
@@ -763,6 +755,8 @@ impl<'a, 'b> Selector<'a, 'b> {
                     } else {
                         self.current = Some(v);
                     }
+
+                    self.update_not_found_by_current();
                 }
                 ExprTerm::Bool(false) => {
                     self.current = Some(vec![]);
@@ -843,6 +837,8 @@ impl<'a, 'b> Selector<'a, 'b> {
                         );
 
                         self.current = current;
+                        self.update_not_found_by_current();
+
                         self.chose_indices.extend(chose_indices.unwrap_or_default());
                     }
                     _ => {}
@@ -876,6 +872,8 @@ impl<'a, 'b> Selector<'a, 'b> {
                 self.selector_filter
                     .collect_next_with_str(&self.current, values, keys);
             self.current = current;
+            self.update_not_found_by_current();
+
             self.chose_indices.extend(chose_indices.unwrap_or_default());
         } else {
             unreachable!();
@@ -1028,6 +1026,14 @@ impl<'a, 'b> Selector<'a, 'b> {
             self.current = Some(tmp);
         } else {
             unreachable!();
+        }
+    }
+
+    fn update_not_found_by_current(&mut self) {
+        println!("current: {:?}", self.current);
+
+        if let Some(values) = &self.current {
+            self.not_found_by_key_index |= values.is_empty();
         }
     }
 

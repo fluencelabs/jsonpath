@@ -54,6 +54,7 @@ fn return_type_for_child_object_matched() {
 }
 
 #[test]
+#[ignore]
 fn return_type_for_child_object_not_matched() {
     setup();
 
